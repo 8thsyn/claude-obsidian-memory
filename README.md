@@ -4,26 +4,19 @@ A Claude Code plugin that stores persistent memory as markdown files in an Obsid
 
 ## Features
 
-- **Three lifecycle hooks** that load vault context, surface relevant notes, and journal sessions automatically
-- **Two in-session skills** for searching and saving memories on demand
+- **Three lifecycle hooks** — SessionStart loads vault context, UserPromptSubmit surfaces relevant notes, SessionEnd journals and auto-commits
+- **Two in-session skills** — vault-search and save-memory for on-demand lookup and capture
+- **Custom memory types** — add, remove, or reset memory categories via `types` command
+- **Usage tracking** — estimate token counts across all notes
+- **Integrity audit** — validate frontmatter on all notes
+- **Git auto-commit** — optional, auto-commits vault changes on session end
 - **Plain markdown storage** with YAML frontmatter — every memory is a file you can open and edit
-- **Zero dependencies** — uses only Node.js built-in modules
-- **Windows-native** — no Rust toolchain, no WSL required
-- **Obsidian-optional** — vault is just markdown, works with any editor
+- **Windows-native** — Node.js, no WSL or Rust toolchain required
+- **Zero npm dependencies** — uses only Node.js built-in modules
 
 ## Installation
 
-### Via plugin marketplace (recommended)
-
-```text
-/plugin marketplace add 8thsyn/claude-obsidian-memory
-/plugin install obsidian-memory@8thsyn
-/reload-plugins
-```
-
-The hooks auto-install on first session start. Answer **yes** to the setup prompt and Claude runs the initialization for you.
-
-### Manual setup
+Clone the repo and point hooks to the binary:
 
 Clone the repo and configure hooks in `~/.claude/settings.json`:
 
@@ -91,10 +84,25 @@ Each note uses YAML frontmatter with `type`, `description`, `created_at`, `updat
 
 ## Slash commands
 
-| Command                   | Description                             |
-| ------------------------- | --------------------------------------- |
-| `/obsidian-memory:status` | Vault health check and note counts      |
-| `/obsidian-memory:usage`  | Token breakdown for the current session |
+| Command                   | Description                            |
+| ------------------------- | -------------------------------------- |
+| `/obsidian-memory:status` | Vault health check and note counts     |
+| `/obsidian-memory:usage`  | Estimated token usage across all notes |
+
+## CLI commands
+
+| Command                     | Description                               |
+| --------------------------- | ----------------------------------------- |
+| `setup`                     | Initialize vault and config               |
+| `status`                    | Health check with counts, config, git     |
+| `usage`                     | Estimated token usage (`--json` for JSON) |
+| `vault search --keywords q` | Search notes by keyword                   |
+| `vault list`                | List all notes by directory               |
+| `vault audit`               | Check frontmatter integrity               |
+| `types list`                | Configured memory types                   |
+| `types add <name>`          | Add a memory type                         |
+| `types remove <name>`       | Remove a memory type                      |
+| `types reset`               | Reset to default types                    |
 
 ## In-session skills
 
