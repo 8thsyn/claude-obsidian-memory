@@ -54,7 +54,9 @@ function loadConfig() {
 
 function vaultPath() {
   const config = loadConfig();
-  return config.OBSIDIAN_VAULT_PATH || DEFAULT_VAULT;
+  const raw = config.OBSIDIAN_VAULT_PATH || DEFAULT_VAULT;
+  // Normalize backslashes to forward slashes for cross-platform fs compatibility
+  return raw.replace(/\\/g, "/");
 }
 
 function ensureDir(p) {
@@ -139,7 +141,11 @@ async function cmdSetup(args = {}) {
   for (const dir of ["Tools", "Journals", "Notes"]) ensureDir(join(vault, dir));
   ensureDir(CONFIG_DIR);
   const configPath = join(CONFIG_DIR, "config.env");
-  writeFileSync(configPath, `OBSIDIAN_VAULT_PATH=${vault}\n`, "utf-8");
+  writeFileSync(
+    configPath,
+    `OBSIDIAN_VAULT_PATH=${vault.replace(/\\/g, "/")}\n`,
+    "utf-8",
+  );
 
   // Seed default types
   if (!existsSync(TYPES_FILE)) {
