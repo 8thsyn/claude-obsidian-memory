@@ -8,6 +8,7 @@ import {
   readdirSync,
   statSync,
   appendFileSync,
+  readlinkSync,
 } from "fs";
 import { join, dirname, basename } from "path";
 import { homedir } from "os";
@@ -15,11 +16,21 @@ import { execSync } from "child_process";
 import { stdin, exit } from "process";
 
 const __dirname = dirname(
-  new URL(import.meta.url).pathname.replace(/^\/[a-z]\//i, (m) => m[1] + ":/"),
+  new URL(import.meta.url).pathname.replace(/^\/[a-z]\//i, (m) => m[1] + ":"),
 );
 const PKG_ROOT = dirname(__dirname);
 const CONFIG_DIR = join(homedir(), ".config", "obsidian-memory");
 const DEFAULT_VAULT = join(homedir(), "Documents", "Obsidian Memory");
+const TYPES_FILE = join(CONFIG_DIR, "types.yaml");
+const DEFAULT_TYPES = [
+  "preference",
+  "reference",
+  "findings",
+  "decision",
+  "learning",
+  "tool",
+  "journal",
+];
 
 function readStdin() {
   return new Promise((resolve) => {
@@ -110,17 +121,45 @@ function gitAutoCommit(vault) {
   } catch {}
 }
 
+function loadMemoryTypes() {
+  if (!existsSync(TYPES_FILE)) return DEFAULT_TYPES;
+  const content = readFileSync(TYPES_FILE, "utf-8");
+  const types = [];
+  for (const line of content.split("\n")) {
+    const m = line.match(/^\s*-\s+(.+)$/);
+    if (m) types.push(m[1].trim());
+  }
+  return types.length ? types : DEFAULT_TYPES;
+}
+
+// ─── Commands ──────────────────────────────────────────────────────────
+
 async function cmdSetup(args = {}) {
   const vault = args.vault || vaultPath();
   for (const dir of ["Tools", "Journals", "Notes"]) ensureDir(join(vault, dir));
   ensureDir(CONFIG_DIR);
-  writeFileSync(
-    join(CONFIG_DIR, "config.env"),
-    `OBSIDIAN_VAULT_PATH=${vault}\n`,
-    "utf-8",
-  );
+  const configPath = join(CONFIG_DIR, "config.env");
+  writeFileSync(configPath, `OBSIDIAN_VAULT_PATH=${vault}\n`, "utf-8");
+
+  // Seed default types
+  if (!existsSync(TYPES_FILE)) {
+    writeFileSync(
+      TYPES_FILE,
+      DEFAULT_TYPES.map((t) => `- ${t}`).join("\n"),
+      "utf-8",
+    );
+  }
+
   console.log(`Vault initialized at ${vault}`);
-  console.log(`Config written to ${join(CONFIG_DIR, "config.env")}`);
+  console.log(`Config written to ${configPath}`);
+
+  // Interactive: prompt to git init
+  if (!existsSync(join(vault, ".git"))) {
+    console.log("\nTip: enable git tracking for auto-commit on session-end:");
+    console.log(`  git -C "${vault}" init`);
+    console.log(`  git -C "${vault}" add -A`);
+    console.log(`  git -C "${vault}" commit -m "chore: initialize vault"`);
+  }
 }
 
 async function cmdStatus() {
@@ -129,7 +168,11 @@ async function cmdStatus() {
   console.log(`Vault: ${vault}`);
   console.log(`Status: ${exists ? "active" : "not found"}`);
 
-  if (!exists) return;
+  if (!exists) {
+    console.log("\nTo initialize:");
+    console.log(`  claude-obsidian-memory setup --vault "${vault}"`);
+    return;
+  }
 
   let total = 0;
   for (const dir of readdirSync(vault)) {
@@ -154,9 +197,9 @@ async function cmdStatus() {
       console.log(`Last journal: ${journals[0].replace(".md", "")}`);
   }
 
-  const config = loadConfig();
   const configPath = join(CONFIG_DIR, "config.env");
   console.log(`Config: ${existsSync(configPath) ? "found" : "missing"}`);
+  console.log(`Types: ${loadMemoryTypes().length} configured`);
   if (existsSync(join(vault, ".git"))) console.log("Git: enabled");
 }
 
@@ -164,6 +207,7 @@ async function cmdHookSessionStart() {
   const vault = vaultPath();
   if (!existsSync(vault)) {
     console.log("[obsidian-memory] Vault not found. Run setup first.");
+    console.log("[obsidian-memory]   claude-obsidian-memory setup");
     return;
   }
 
@@ -189,6 +233,9 @@ async function cmdHookSessionStart() {
       console.log(`  ${n.path} — ${n.description.slice(0, 80)}`);
     if (overview.length > 10)
       console.log(`  ... and ${overview.length - 10} more`);
+    console.log(
+      `[obsidian-memory] Memory types: ${loadMemoryTypes().join(", ")}`,
+    );
   } else {
     console.log(
       "[obsidian-memory] Vault is empty. Use save-memory to add notes.",
@@ -349,43 +396,132 @@ async function cmdVaultAudit() {
   }
 
   let issues = [];
-
   for (const dirName of ["Tools", "Notes"]) {
     const dir = join(vault, dirName);
     if (!existsSync(dir)) continue;
     for (const file of readdirSync(dir).filter((f) => f.endsWith(".md"))) {
       const content = readFileSync(join(dir, file), "utf-8");
       const fm = parseFrontmatter(content);
-
-      if (!fm.type)
-        issues.push(`${dirName}/${file}: missing type in frontmatter`);
+      if (!fm.type) issues.push(`${dirName}/${file}: missing type`);
       if (!fm.description)
-        issues.push(`${dirName}/${file}: missing description in frontmatter`);
-      if (!fm.created_at)
-        issues.push(`${dirName}/${file}: missing created_at in frontmatter`);
+        issues.push(`${dirName}/${file}: missing description`);
+      if (!fm.created_at) issues.push(`${dirName}/${file}: missing created_at`);
     }
   }
 
   if (issues.length) {
-    console.log(`Found ${issues.length} issues:\n`);
+    console.log(`Found ${issues.length} issues:`);
     for (const issue of issues) console.log(`  - ${issue}`);
   } else {
     console.log("No issues found. All notes have valid frontmatter.");
   }
 }
 
-async function cmdUsage() {
-  console.log(
-    "Usage tracking not yet implemented. Coming in a future release.",
-  );
+async function cmdTypes(args) {
+  const action = args._[1] || "list";
+
+  if (action === "list") {
+    const types = loadMemoryTypes();
+    console.log("Memory types:");
+    types.forEach((t, i) => console.log(`  ${i + 1}. ${t}`));
+    return;
+  }
+
+  if (action === "add") {
+    const type = args._.slice(2).join(" ") || args.type;
+    if (!type) {
+      console.error("Usage: types add <type-name>");
+      exit(1);
+    }
+    const types = loadMemoryTypes();
+    if (types.includes(type)) {
+      console.log(`Type "${type}" already exists.`);
+      return;
+    }
+    types.push(type);
+    writeFileSync(TYPES_FILE, types.map((t) => `- ${t}`).join("\n"), "utf-8");
+    console.log(`Added type: ${type}`);
+    return;
+  }
+
+  if (action === "remove") {
+    const type = args._.slice(2).join(" ") || args.type;
+    if (!type) {
+      console.error("Usage: types remove <type-name>");
+      exit(1);
+    }
+    let types = loadMemoryTypes();
+    if (!types.includes(type)) {
+      console.log(`Type "${type}" not found.`);
+      return;
+    }
+    types = types.filter((t) => t !== type);
+    writeFileSync(TYPES_FILE, types.map((t) => `- ${t}`).join("\n"), "utf-8");
+    console.log(`Removed type: ${type}`);
+    return;
+  }
+
+  if (action === "reset") {
+    writeFileSync(
+      TYPES_FILE,
+      DEFAULT_TYPES.map((t) => `- ${t}`).join("\n"),
+      "utf-8",
+    );
+    console.log("Reset to default types.");
+    return;
+  }
+
+  console.error("Usage: types [list|add|remove|reset]");
+  exit(1);
 }
 
+async function cmdUsage(args = {}) {
+  const vault = vaultPath();
+  if (!existsSync(vault)) {
+    console.error("Vault not found.");
+    exit(1);
+  }
+
+  // Count tokens across all notes (approximate: 4 chars = 1 token)
+  let totalChars = 0;
+  let noteCount = 0;
+  for (const dirName of ["Tools", "Notes", "Journals"]) {
+    const dir = join(vault, dirName);
+    if (!existsSync(dir)) continue;
+    for (const file of readdirSync(dir).filter((f) => f.endsWith(".md"))) {
+      const content = readFileSync(join(dir, file), "utf-8");
+      totalChars += content.length;
+      noteCount++;
+    }
+  }
+  const estimatedTokens = Math.round(totalChars / 4);
+  console.log("Vault usage:");
+  console.log(`  Notes: ${noteCount}`);
+  console.log(`  Characters: ${totalChars.toLocaleString()}`);
+  console.log(`  Estimated tokens: ${estimatedTokens.toLocaleString()}`);
+  console.log(`  Memory types: ${loadMemoryTypes().length}`);
+
+  // Status line output (for Claude Code status bar integration)
+  if (args && args.json) {
+    console.log(
+      JSON.stringify({
+        notes: noteCount,
+        chars: totalChars,
+        tokens: estimatedTokens,
+      }),
+    );
+  }
+}
+
+// ─── Arg parsing ────────────────────────────────────────────────────────
+
 const args = process.argv.slice(2);
-const parsed = { _: [], json: false, keywords: null, vault: null };
+const parsed = { _: [], json: false, keywords: null, vault: null, type: null };
 for (let i = 0; i < args.length; i++) {
   if (args[i] === "--json") parsed.json = true;
   else if (args[i] === "--keywords") parsed.keywords = args[++i];
   else if (args[i] === "--vault") parsed.vault = args[++i];
+  else if (args[i] === "--type") parsed.type = args[++i];
   else parsed._.push(args[i]);
 }
 
@@ -399,25 +535,32 @@ const cmds = {
   "vault search": cmdVaultSearch,
   "vault list": cmdVaultList,
   "vault audit": cmdVaultAudit,
+  "types list": cmdTypes,
+  "types add": cmdTypes,
+  "types remove": cmdTypes,
+  "types reset": cmdTypes,
 };
 
 const key2 = parsed._.slice(0, 2).join(" ");
 const key = cmds[key2] ? key2 : parsed._[0] || "";
 const handler = cmds[key];
 if (!handler) {
-  console.log(
-    "Usage: claude-obsidian-memory <setup|status|hook|vault> [options]",
-  );
+  console.log("Usage: claude-obsidian-memory <command> [options]");
+  console.log("");
   console.log("Commands:");
   console.log("  setup                    Initialize the vault");
-  console.log("  status                   Show vault status");
-  console.log("  usage                    Show token usage (coming soon)");
-  console.log("  hook session-start       SessionStart lifecycle hook");
-  console.log("  hook session-end         SessionEnd lifecycle hook");
-  console.log("  hook user-prompt-submit  UserPromptSubmit lifecycle hook");
-  console.log("  vault search --keywords  Search notes by keyword");
-  console.log("  vault list               List all notes");
+  console.log("  status                   Show vault status and health");
+  console.log("  usage                    Show approximate token usage");
+  console.log("  hook session-start       Load vault context at session start");
+  console.log("  hook session-end         Write journal entry and auto-commit");
+  console.log("  hook user-prompt-submit  Match prompt against vault notes");
+  console.log("  vault search --keywords  Search notes by keyword (--json)");
+  console.log("  vault list               List all notes by directory");
   console.log("  vault audit              Check frontmatter integrity");
+  console.log("  types list               List memory types");
+  console.log("  types add <name>         Add a memory type");
+  console.log("  types remove <name>      Remove a memory type");
+  console.log("  types reset              Reset to default types");
   exit(1);
 }
 handler(parsed).catch((e) => {
