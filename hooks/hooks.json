@@ -1,0 +1,53 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/bin/claude-obsidian-memory.js",
+              "hook",
+              "session-start"
+            ],
+            "statusMessage": "Loading vault context..."
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/bin/claude-obsidian-memory.js",
+              "hook",
+              "session-end"
+            ],
+            "statusMessage": "Writing session journal...",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/bin/claude-obsidian-memory.js",
+              "hook",
+              "user-prompt-submit"
+            ],
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}

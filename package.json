@@ -1,0 +1,16 @@
+{
+  "name": "claude-obsidian-memory",
+  "version": "1.0.0",
+  "description": "Persistent memory for Claude Code using Obsidian-compatible markdown vaults",
+  "main": "bin/claude-obsidian-memory.js",
+  "type": "module",
+  "scripts": {
+    "setup": "node bin/claude-obsidian-memory.js setup",
+    "test": "node bin/claude-obsidian-memory.js vault search --keywords test"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/8thsyn/claude-obsidian-memory"
+  }
+}
