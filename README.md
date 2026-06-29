@@ -28,8 +28,12 @@ Clone the repo and configure hooks in `~/.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "node /path/to/claude-obsidian-memory/bin/claude-obsidian-memory.js",
-            "args": ["hook", "session-start"],
+            "command": "node",
+            "args": [
+              "/path/to/claude-obsidian-memory/bin/claude-obsidian-memory.js",
+              "hook",
+              "session-start"
+            ],
             "statusMessage": "Loading vault context..."
           }
         ]
@@ -40,8 +44,12 @@ Clone the repo and configure hooks in `~/.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "node /path/to/claude-obsidian-memory/bin/claude-obsidian-memory.js",
-            "args": ["hook", "session-end"],
+            "command": "node",
+            "args": [
+              "/path/to/claude-obsidian-memory/bin/claude-obsidian-memory.js",
+              "hook",
+              "session-end"
+            ],
             "statusMessage": "Writing session journal...",
             "async": true
           }
@@ -53,8 +61,12 @@ Clone the repo and configure hooks in `~/.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "node /path/to/claude-obsidian-memory/bin/claude-obsidian-memory.js",
-            "args": ["hook", "user-prompt-submit"],
+            "command": "node",
+            "args": [
+              "/path/to/claude-obsidian-memory/bin/claude-obsidian-memory.js",
+              "hook",
+              "user-prompt-submit"
+            ],
             "async": true
           }
         ]
