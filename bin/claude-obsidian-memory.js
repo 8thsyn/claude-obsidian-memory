@@ -98,36 +98,66 @@ function vaultSearch(vault, keywords, limit) {
   return results.slice(0, limit);
 }
 
+function gitAutoCommit(vault) {
+  try {
+    const gitDir = join(vault, ".git");
+    if (!existsSync(gitDir)) return;
+    execSync(`git -C "${vault}" add -A`, { stdio: "pipe", timeout: 10000 });
+    execSync(
+      `git -C "${vault}" commit -m "chore: auto-save vault changes" --allow-empty --no-gpg-sign`,
+      { stdio: "pipe", timeout: 15000 },
+    );
+  } catch {}
+}
+
 async function cmdSetup(args = {}) {
   const vault = args.vault || vaultPath();
   for (const dir of ["Tools", "Journals", "Notes"]) ensureDir(join(vault, dir));
   ensureDir(CONFIG_DIR);
-  const configPath = join(CONFIG_DIR, "config.env");
-  if (!existsSync(configPath))
-    writeFileSync(configPath, `OBSIDIAN_VAULT_PATH=${vault}\n`, "utf-8");
-  console.log("Vault initialized at", vault);
+  writeFileSync(
+    join(CONFIG_DIR, "config.env"),
+    `OBSIDIAN_VAULT_PATH=${vault}\n`,
+    "utf-8",
+  );
+  console.log(`Vault initialized at ${vault}`);
+  console.log(`Config written to ${join(CONFIG_DIR, "config.env")}`);
 }
 
 async function cmdStatus() {
   const vault = vaultPath();
-  console.log("Vault:", vault, existsSync(vault) ? "(exists)" : "(not found)");
-  if (existsSync(vault)) {
-    for (const dir of readdirSync(vault)) {
-      const full = join(vault, dir);
-      if (statSync(full).isDirectory()) {
-        const files = readdirSync(full).filter((f) => f.endsWith(".md"));
-        if (files.length) console.log(`  ${dir}/: ${files.length} files`);
+  const exists = existsSync(vault);
+  console.log(`Vault: ${vault}`);
+  console.log(`Status: ${exists ? "active" : "not found"}`);
+
+  if (!exists) return;
+
+  let total = 0;
+  for (const dir of readdirSync(vault)) {
+    const full = join(vault, dir);
+    if (statSync(full).isDirectory()) {
+      const files = readdirSync(full).filter((f) => f.endsWith(".md"));
+      if (files.length) {
+        console.log(`  ${dir}/: ${files.length} files`);
+        total += files.length;
       }
     }
-    const journalsDir = join(vault, "Journals");
-    if (existsSync(journalsDir)) {
-      const journals = readdirSync(journalsDir)
-        .filter((f) => f.endsWith(".md"))
-        .sort()
-        .reverse();
-      if (journals.length) console.log("  Last journal:", journals[0]);
-    }
   }
+  console.log(`Total notes: ${total}`);
+
+  const journalsDir = join(vault, "Journals");
+  if (existsSync(journalsDir)) {
+    const journals = readdirSync(journalsDir)
+      .filter((f) => f.endsWith(".md"))
+      .sort()
+      .reverse();
+    if (journals.length)
+      console.log(`Last journal: ${journals[0].replace(".md", "")}`);
+  }
+
+  const config = loadConfig();
+  const configPath = join(CONFIG_DIR, "config.env");
+  console.log(`Config: ${existsSync(configPath) ? "found" : "missing"}`);
+  if (existsSync(join(vault, ".git"))) console.log("Git: enabled");
 }
 
 async function cmdHookSessionStart() {
@@ -136,6 +166,7 @@ async function cmdHookSessionStart() {
     console.log("[obsidian-memory] Vault not found. Run setup first.");
     return;
   }
+
   const overview = [];
   for (const dirName of ["Tools", "Notes", "Journals"]) {
     const dir = join(vault, dirName);
@@ -151,40 +182,49 @@ async function cmdHookSessionStart() {
       });
     }
   }
+
   if (overview.length) {
     console.log(`[obsidian-memory] Vault loaded: ${overview.length} notes`);
-    for (const n of overview.slice(0, 8))
+    for (const n of overview.slice(0, 10))
       console.log(`  ${n.path} — ${n.description.slice(0, 80)}`);
-    if (overview.length > 8)
-      console.log(`  ... and ${overview.length - 8} more`);
+    if (overview.length > 10)
+      console.log(`  ... and ${overview.length - 10} more`);
+  } else {
+    console.log(
+      "[obsidian-memory] Vault is empty. Use save-memory to add notes.",
+    );
   }
 }
 
 async function cmdHookSessionEnd() {
   const vault = vaultPath();
   if (!existsSync(vault)) return;
+
   const journalDir = join(vault, "Journals");
   ensureDir(journalDir);
-  const journalFile = join(
-    journalDir,
-    `${new Date().toISOString().slice(0, 10)}.md`,
-  );
-  if (!existsSync(journalFile))
+  const today = new Date().toISOString().slice(0, 10);
+  const journalFile = join(journalDir, `${today}.md`);
+
+  if (!existsSync(journalFile)) {
     writeFileSync(
       journalFile,
       frontmatter({
         type: "journal",
-        description: `Session ${new Date().toISOString().slice(0, 10)}`,
+        description: `Session ${today}`,
         created_at: now(),
-      }) + `# ${new Date().toISOString().slice(0, 10)}\n\n`,
+      }) + `# ${today}\n\n`,
       "utf-8",
     );
+  }
   appendFileSync(journalFile, `- Activity at ${now()}\n`, "utf-8");
+
+  gitAutoCommit(vault);
 }
 
 async function cmdHookUserPromptSubmit() {
   const vault = vaultPath();
   if (!existsSync(vault)) return;
+
   const payload = await readStdin();
   let promptText = "";
   try {
@@ -194,6 +234,7 @@ async function cmdHookUserPromptSubmit() {
     promptText = payload;
   }
   if (!promptText) return;
+
   const stopWords = new Set([
     "the",
     "this",
@@ -231,12 +272,14 @@ async function cmdHookUserPromptSubmit() {
         .filter((w) => w.length > 2 && !stopWords.has(w)),
     ),
   ];
+
   if (keywords.length < 2) return;
   const matches = vaultSearch(vault, keywords, 3);
-  if (matches.length)
+  if (matches.length) {
     console.log(
       `[obsidian-memory] Matched: ${matches.map((m) => m.path).join(", ")}`,
     );
+  }
 }
 
 async function cmdVaultSearch(args) {
@@ -245,6 +288,7 @@ async function cmdVaultSearch(args) {
     console.error("Vault not found. Run setup first.");
     exit(1);
   }
+
   const keywords = (args.keywords || args._.slice(2).join(" ") || "")
     .split(/\s+/)
     .filter(Boolean);
@@ -252,17 +296,24 @@ async function cmdVaultSearch(args) {
     console.error("Usage: vault search --keywords <terms>");
     exit(1);
   }
+
   const results = vaultSearch(vault, keywords, 20);
   if (!results.length) {
     console.log("No matches.");
     return;
   }
+
   if (args.json) {
     console.log(JSON.stringify(results, null, 2));
     return;
   }
-  for (const r of results)
-    console.log(`  ${r.path} [${r.type}] ${r.description.slice(0, 100)}`);
+  console.log(`Found ${results.length} matches:\n`);
+  for (const r of results) {
+    console.log(`  ${r.path}`);
+    console.log(`    Type: ${r.type}  Score: ${(r.score * 100).toFixed(0)}%`);
+    if (r.description) console.log(`    ${r.description.slice(0, 120)}`);
+    console.log();
+  }
 }
 
 async function cmdVaultList() {
@@ -271,17 +322,62 @@ async function cmdVaultList() {
     console.error("Vault not found.");
     exit(1);
   }
+
+  let total = 0;
   for (const dirName of ["Tools", "Notes", "Journals"]) {
     const dir = join(vault, dirName);
     if (!existsSync(dir)) continue;
-    console.log(`\n${dirName}/:`);
-    for (const file of readdirSync(dir)
+    const files = readdirSync(dir)
       .filter((f) => f.endsWith(".md"))
-      .sort()) {
+      .sort();
+    if (!files.length) continue;
+    console.log(`\n${dirName}/`);
+    for (const file of files) {
       const fm = parseFrontmatter(readFileSync(join(dir, file), "utf-8"));
-      console.log(`  ${file}  ${fm.description || ""}`);
+      console.log(`  ${file}  ${fm.description || "(no description)"}`);
+      total++;
     }
   }
+  console.log(`\nTotal: ${total} notes`);
+}
+
+async function cmdVaultAudit() {
+  const vault = vaultPath();
+  if (!existsSync(vault)) {
+    console.error("Vault not found.");
+    exit(1);
+  }
+
+  let issues = [];
+
+  for (const dirName of ["Tools", "Notes"]) {
+    const dir = join(vault, dirName);
+    if (!existsSync(dir)) continue;
+    for (const file of readdirSync(dir).filter((f) => f.endsWith(".md"))) {
+      const content = readFileSync(join(dir, file), "utf-8");
+      const fm = parseFrontmatter(content);
+
+      if (!fm.type)
+        issues.push(`${dirName}/${file}: missing type in frontmatter`);
+      if (!fm.description)
+        issues.push(`${dirName}/${file}: missing description in frontmatter`);
+      if (!fm.created_at)
+        issues.push(`${dirName}/${file}: missing created_at in frontmatter`);
+    }
+  }
+
+  if (issues.length) {
+    console.log(`Found ${issues.length} issues:\n`);
+    for (const issue of issues) console.log(`  - ${issue}`);
+  } else {
+    console.log("No issues found. All notes have valid frontmatter.");
+  }
+}
+
+async function cmdUsage() {
+  console.log(
+    "Usage tracking not yet implemented. Coming in a future release.",
+  );
 }
 
 const args = process.argv.slice(2);
@@ -296,11 +392,13 @@ for (let i = 0; i < args.length; i++) {
 const cmds = {
   setup: cmdSetup,
   status: cmdStatus,
+  usage: cmdUsage,
   "hook session-start": cmdHookSessionStart,
   "hook session-end": cmdHookSessionEnd,
   "hook user-prompt-submit": cmdHookUserPromptSubmit,
   "vault search": cmdVaultSearch,
   "vault list": cmdVaultList,
+  "vault audit": cmdVaultAudit,
 };
 
 const key2 = parsed._.slice(0, 2).join(" ");
@@ -310,6 +408,16 @@ if (!handler) {
   console.log(
     "Usage: claude-obsidian-memory <setup|status|hook|vault> [options]",
   );
+  console.log("Commands:");
+  console.log("  setup                    Initialize the vault");
+  console.log("  status                   Show vault status");
+  console.log("  usage                    Show token usage (coming soon)");
+  console.log("  hook session-start       SessionStart lifecycle hook");
+  console.log("  hook session-end         SessionEnd lifecycle hook");
+  console.log("  hook user-prompt-submit  UserPromptSubmit lifecycle hook");
+  console.log("  vault search --keywords  Search notes by keyword");
+  console.log("  vault list               List all notes");
+  console.log("  vault audit              Check frontmatter integrity");
   exit(1);
 }
 handler(parsed).catch((e) => {
